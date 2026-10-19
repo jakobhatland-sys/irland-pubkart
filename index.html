@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puber i Irland</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --bg: #0e1117; --panel: rgba(14,17,23,.88); --line: #262b36;
+    --text: #e8e6e1; --muted: #8b909a; --amber: #f2b632; --amber-dim: #f2b63233;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #map { position: absolute; inset: 0; }
+
+  #panel { position: absolute; top: 16px; left: 16px; width: 300px; max-height: calc(100% - 32px);
+    background: var(--panel); backdrop-filter: blur(8px); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px; z-index: 2; }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .2px; }
+  h1 span { color: var(--amber); font-variant-numeric: tabular-nums; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 18px; color: var(--amber); font-variant-numeric: tabular-nums; }
+  .stat small { color: var(--muted); font-size: 11px; }
+
+  input[type=search] { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line);
+    background: #151922; color: var(--text); font: inherit; outline: none; }
+  input[type=search]:focus { border-color: var(--amber); }
+  #results { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 220px; }
+  #results li { padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+  #results li:hover { background: #1b202b; }
+  #results li small { color: var(--muted); margin-left: 6px; }
+
+  .toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); cursor: pointer; user-select: none; }
+  .toggle input { accent-color: var(--amber); }
+  .foot { color: var(--muted); font-size: 11px; }
+  .foot a { color: var(--muted); }
+
+  /* Popup */
+  .maplibregl-popup-content { background: #151922; color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; box-shadow: 0 8px 30px rgba(0,0,0,.5); min-width: 220px; }
+  .maplibregl-popup-tip { border-top-color: #151922 !important; border-bottom-color: #151922 !important; }
+  .maplibregl-popup-close-button { color: var(--muted); font-size: 18px; right: 4px; top: 2px; }
+  .pop h3 { margin: 0 0 4px; font-size: 16px; color: var(--amber); }
+  .pop .addr { color: var(--muted); margin-bottom: 8px; }
+  .pop table { border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
+  .pop td { padding: 2px 8px 2px 0; vertical-align: top; }
+  .pop td:first-child { color: var(--muted); }
+  .pop code { font-family: ui-monospace, Consolas, monospace; }
+  .pop .links { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+  .pop a, .pop button { color: var(--amber); background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: none; }
+  .pop a:hover, .pop button:hover { text-decoration: underline; }
+
+  @media (max-width: 640px) {
+    #panel { left: 8px; right: 8px; top: 8px; width: auto; padding: 12px; gap: 10px; }
+    #results { max-height: 140px; }
+    .stats, .toggle, .foot { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="panel">
+  <div>
+    <h1><span id="total">–</span> puber i Irland</h1>
+    <div class="sub">Republikken Irland og Nord-Irland · OpenStreetMap</div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="inview">–</b><small>i kartutsnittet</small></div>
+    <div class="stat"><b id="named">–</b><small>med navn</small></div>
+  </div>
+  <input id="search" type="search" placeholder="Søk etter pub eller by …" autocomplete="off">
+  <ul id="results"></ul>
+  <label class="toggle"><input type="checkbox" id="heat"> Vis varmekart (tetthet)</label>
+  <div class="foot">Klikk på en prikk for navn og koordinater.<br>
+    Data © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>-bidragsytere (ODbL)</div>
+</aside>
+
+<script>
+const AMBER = "#f2b632";
+let pubs = [];
+
+const map = new maplibregl.Map({
+  container: "map",
+  style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+  center: [-7.7, 53.45],
+  zoom: 6.1,
+  attributionControl: { compact: true }
+});
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), "top-right");
+map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+map.on("load", async () => {
+  const data = await fetch("pubs.geojson").then(r => r.json());
+  pubs = data.features;
+
+  map.addSource("pubs", { type: "geojson", data });
+
+  // Varmekart (av som standard)
+  map.addLayer({
+    id: "pubs-heat", type: "heatmap", source: "pubs",
+    layout: { visibility: "none" },
+    paint: {
+      "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 5, 6, 10, 22],
+      "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 10, 1.5],
+      "heatmap-opacity": 0.75,
+      "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"],
+        0, "rgba(0,0,0,0)", 0.2, "#4a2a05", 0.45, "#a3620c", 0.7, "#f2b632", 1, "#fff3c4"]
+    }
+  });
+
+  // Glød
+  map.addLayer({
+    id: "pubs-glow", type: "circle", source: "pubs",
+    paint: {
+      "circle-color": AMBER,
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3, 10, 10, 16, 26],
+      "circle-blur": 1,
+      "circle-opacity": 0.22
+    }
+  });
+
+  // Kjerne
+  map.addLayer({
+    id: "pubs-dot", type: "circle", source: "pubs",
+    paint: {
+      "circle-color": AMBER,
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 1.1, 10, 3, 16, 7],
+      "circle-opacity": 0.9,
+      "circle-stroke-color": "#0e1117",
+      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 0, 14, 1.5]
+    }
+  });
+
+  // Valgt pub
+  map.addLayer({
+    id: "pubs-selected", type: "circle", source: "pubs",
+    filter: ["==", ["get", "id"], ""],
+    paint: {
+      "circle-color": "#ffffff",
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 4, 16, 10],
+      "circle-stroke-color": AMBER, "circle-stroke-width": 3
+    }
+  });
+
+  // Usynlig, større treffflate så det er lett å klikke
+  map.addLayer({
+    id: "pubs-hit", type: "circle", source: "pubs",
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 4, 16, 14], "circle-opacity": 0 }
+  });
+
+  document.getElementById("total").textContent = pubs.length.toLocaleString("no");
+  document.getElementById("named").textContent = pubs.filter(f => f.properties.navn).length.toLocaleString("no");
+  updateInView();
+});
+
+function popupHtml(f) {
+  const p = f.properties;
+  const [lon, lat] = f.geometry.coordinates;
+  const addr = [p.gate, p.by].filter(Boolean).join(", ");
+  const coord = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  const web = p.nettside ? (/^https?:\/\//.test(p.nettside) ? p.nettside : "https://" + p.nettside) : "";
+  return `<div class="pop">
+    <h3>${esc(p.navn || "Pub uten navn")}</h3>
+    ${addr ? `<div class="addr">${esc(addr)}</div>` : ""}
+    <table>
+      <tr><td>Lat</td><td><code>${lat.toFixed(6)}</code></td></tr>
+      <tr><td>Lon</td><td><code>${lon.toFixed(6)}</code></td></tr>
+      ${p.apningstider ? `<tr><td>Åpent</td><td>${esc(p.apningstider)}</td></tr>` : ""}
+    </table>
+    <div class="links">
+      <button data-copy="${coord}">Kopier koordinater</button>
+      <a href="https://www.openstreetmap.org/${esc(p.id)}" target="_blank" rel="noopener">OSM</a>
+      <a href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}" target="_blank" rel="noopener">Google Maps</a>
+      ${web ? `<a href="${esc(web)}" target="_blank" rel="noopener">Nettside</a>` : ""}
+    </div>
+  </div>`;
+}
+
+let popup;
+function openPub(f) {
+  popup?.remove();
+  map.setFilter("pubs-selected", ["==", ["get", "id"], f.properties.id]);
+  popup = new maplibregl.Popup({ offset: 10, maxWidth: "300px" })
+    .setLngLat(f.geometry.coordinates).setHTML(popupHtml(f)).addTo(map);
+  popup.on("close", () => map.setFilter("pubs-selected", ["==", ["get", "id"], ""]));
+}
+
+map.on("click", "pubs-hit", e => openPub(e.features[0]));
+map.on("mouseenter", "pubs-hit", () => map.getCanvas().style.cursor = "pointer");
+map.on("mouseleave", "pubs-hit", () => map.getCanvas().style.cursor = "");
+
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-copy]");
+  if (!t) return;
+  navigator.clipboard?.writeText(t.dataset.copy).then(() => {
+    t.textContent = "Kopiert ✓";
+    setTimeout(() => (t.textContent = "Kopier koordinater"), 1500);
+  });
+});
+
+// Antall i kartutsnittet
+function updateInView() {
+  const b = map.getBounds();
+  const n = pubs.reduce((s, f) => s + (b.contains(f.geometry.coordinates) ? 1 : 0), 0);
+  document.getElementById("inview").textContent = n.toLocaleString("no");
+}
+map.on("moveend", updateInView);
+
+// Søk
+const search = document.getElementById("search");
+const results = document.getElementById("results");
+search.addEventListener("input", () => {
+  const q = search.value.trim().toLowerCase();
+  results.innerHTML = "";
+  if (q.length < 2) return;
+  const hits = pubs.filter(f => {
+    const p = f.properties;
+    return (p.navn || "").toLowerCase().includes(q) || (p.by || "").toLowerCase().includes(q);
+  }).slice(0, 30);
+  results.innerHTML = hits.length
+    ? hits.map((f, i) => `<li data-i="${i}">${esc(f.properties.navn || "Uten navn")}<small>${esc(f.properties.by || "")}</small></li>`).join("")
+    : `<li style="color:var(--muted);cursor:default">Ingen treff</li>`;
+  results.onclick = e => {
+    const li = e.target.closest("li[data-i]");
+    if (!li) return;
+    const f = hits[+li.dataset.i];
+    map.flyTo({ center: f.geometry.coordinates, zoom: 16, speed: 1.6 });
+    map.once("moveend", () => openPub(f));
+  };
+});
+
+// Varmekart av/på
+document.getElementById("heat").addEventListener("change", e => {
+  const on = e.target.checked;
+  map.setLayoutProperty("pubs-heat", "visibility", on ? "visible" : "none");
+  map.setLayoutProperty("pubs-glow", "visibility", on ? "none" : "visible");
+});
+</script>
+</body>
+</html>
