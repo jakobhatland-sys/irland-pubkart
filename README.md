@@ -1,6 +1,6 @@
 # 🍺 Pubs of Ireland – interactive map
 
-**Live map:** https://BRUKERNAVN.github.io/irland-pubkart/
+**Live map:** https://jakobhatland-sys.github.io/irland-pubkart/
 
 ![Pubs of Ireland](irske_puber.png)
 
@@ -9,7 +9,7 @@ Built as a planning tool for a trip to Ireland in 2027: where are the pubs, what
 
 ## Features
 
-- ~5 000 pubs rendered as glowing points on a dark basemap
+- ~5 000 pubs rendered as glowing beer-coloured points on a dark basemap
 - Click a pub → name, address, WGS84 coordinates (6 decimals), opening hours, website
 - Copy coordinates to clipboard, open in OpenStreetMap or Google Maps
 - Search by pub name or town
